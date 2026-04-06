@@ -1,0 +1,27 @@
+=== DATA PROFILE ===
+
+Shape: (2000, 10)
+
+Data Types:
+student_id                str
+department                str
+semester                  str
+course_load             int64
+study_hours_weekly    float64
+gpa                   float64
+attendance_pct        float64
+has_internship            str
+commute_minutes       float64
+scholarship               str
+
+Missing Values:
+student_id: 0 (0.00%)
+department: 0 (0.00%)
+semester: 0 (0.00%)
+course_load: 0 (0.00%)
+study_hours_weekly: 0 (0.00%)
+gpa: 0 (0.00%)
+attendance_pct: 0 (0.00%)
+has_internship: 0 (0.00%)
+commute_minutes: 181 (9.05%)
+scholarship: 389 (19.45%)
