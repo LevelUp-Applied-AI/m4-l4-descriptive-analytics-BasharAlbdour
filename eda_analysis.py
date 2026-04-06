@@ -17,6 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from itertools import combinations
 
 
 # df = pd.read_csv('data/student_performance.csv')
@@ -68,8 +69,8 @@ def load_and_profile(filepath):
     missing_values = df.isnull().sum()
     missing_value_percentage = (missing_values / len(df)) * 100
 
-    df["commute_minutes"].fillna(df["commute_minutes"].median())
-    df["scholarship"].fillna("None")
+    df["commute_minutes"] = df["commute_minutes"].fillna(df["commute_minutes"].median())
+    df["scholarship"] = df["scholarship"].fillna("None")
 
     with open("output/data_profile.txt", "w") as f:
         f.write(f"shape:{shape}\n")
@@ -242,16 +243,20 @@ def run_hypothesis_tests(df):
     gpa_no_intern = df[df["has_internship"] == "No"]["gpa"]
 
     t_stat, p_val = stats.ttest_ind(gpa_intern, gpa_no_intern)
+    # One-tailed test: the hypothesis is directional ("internship → higher GPA"),
+    # so we divide the two-tailed p-value returned by ttest_ind by 2.
+    # This is valid only when t_stat > 0 (internship mean > no-internship mean),
+    # which confirms the direction matches our hypothesis.
     p_val = p_val / 2
 
     pooled_std = np.sqrt((gpa_intern.std() ** 2 + gpa_no_intern.std() ** 2) / 2)
     cohens_d = (gpa_intern.mean() - gpa_no_intern.mean()) / pooled_std
 
-    print("\nTest 1: GPA vs Internship")
+    print("\nTest 1: GPA vs Internship (one-tailed t-test)")
     print(f"Mean GPA (Internship): {gpa_intern.mean():.3f}")
     print(f"Mean GPA (No Internship): {gpa_no_intern.mean():.3f}")
     print(f"t-statistic: {t_stat:.3f}")
-    print(f"p-value: {p_val:.5f}")
+    print(f"p-value (one-tailed): {p_val:.5f}")
     print(f"Cohen's d: {cohens_d:.3f}")
 
     if p_val < 0.05:
@@ -282,9 +287,113 @@ def run_hypothesis_tests(df):
 
     results["chi2_dict"] = {"chi2": chi2, "p": p, "dof": dof}
 
+    departments = df["department"].unique()
+    groups = [df[df["department"] == d]["gpa"].dropna() for d in departments]
+
+    f_stat, p_anova = stats.f_oneway(*groups)
+
+    print("\nTest 3: GPA across Departments (one-way ANOVA)")
+    print(f"  F-statistic : {f_stat:.4f}")
+    print(f"  p-value     : {p_anova:.6f}")
+    print(
+        "  Result:",
+        (
+            "Significant -- at least one department mean differs."
+            if p_anova < 0.05
+            else "Not significant."
+        ),
+    )
+
+    posthoc = []
+
+    if p_anova < 0.05:
+        dept_pairs = list(combinations(departments, 2))
+        n_comparisons = len(dept_pairs)
+        alpha_bonf = 0.05 / n_comparisons
+
+        print(
+            f"\n  Post-hoc pairwise t-tests (Bonferroni a = 0.05/{n_comparisons} = {alpha_bonf:.4f})"
+        )
+        print(
+            f"  {'Dept A':<20} {'Dept B':<20} {'t':>8} {'p_raw':>10} {'p_bonf':>10} {'Sig?':>6}"
+        )
+        print("  " + "-" * 76)
+
+        for dept_a, dept_b in dept_pairs:
+            gpa_a = df[df["department"] == dept_a]["gpa"].dropna()
+            gpa_b = df[df["department"] == dept_b]["gpa"].dropna()
+
+            t, p_raw = stats.ttest_ind(gpa_a, gpa_b)
+            p_bonf = min(p_raw * n_comparisons, 1.0)
+
+            significant = p_bonf < 0.05
+            print(
+                f"  {dept_a:<20} {dept_b:<20} {t:>8.3f} {p_raw:>10.5f}"
+                f" {p_bonf:>10.5f} {'Y' if significant else 'N':>6}"
+            )
+
+            posthoc.append(
+                {
+                    "dept_a": dept_a,
+                    "dept_b": dept_b,
+                    "t": t,
+                    "p_raw": p_raw,
+                    "p_bonf": p_bonf,
+                    "significant": significant,
+                }
+            )
+
+    results["anova_dict"] = {"f_stat": f_stat, "p_value": p_anova, "posthoc": posthoc}
+
     print("=" * 60)
 
     return results
+
+
+def plot_violin(df):
+
+    dept_order = (
+        df.groupby("department")["gpa"]
+        .median()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    sns.violinplot(
+        x="department",
+        y="gpa",
+        data=df,
+        order=dept_order,
+        inner="box",
+        palette="muted",
+        ax=ax,
+    )
+
+    for i, dept in enumerate(dept_order):
+        median_val = df[df["department"] == dept]["gpa"].median()
+        ax.text(
+            i,
+            median_val + 0.05,
+            f"{median_val:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            fontweight="bold",
+        )
+
+    ax.set_title(
+        "GPA Distribution by Department\n(violin width = density of students)",
+        fontsize=13,
+    )
+    ax.set_xlabel("Department")
+    ax.set_ylabel("GPA")
+    plt.xticks(rotation=30)
+    fig.tight_layout()
+    fig.savefig("output/gpa_violin_by_department.png", dpi=150)
+    plt.close(fig)
+    print("Violin plot saved -> output/gpa_violin_by_department.png")
 
 
 def write_findings(df, corr_matrix, top_pairs, results):
@@ -316,7 +425,18 @@ def write_findings(df, corr_matrix, top_pairs, results):
         f.write("### Internship vs GPA\n")
         f.write(f"- Mean GPA (Internship): {t['mean_yes']:.3f}\n")
         f.write(f"- Mean GPA (No Internship): {t['mean_no']:.3f}\n")
-        f.write(f"- t = {t['t']:.3f}, p = {t['p']:.5f}, d = {t['d']:.3f}\n")
+        f.write(
+            f"- t = {t['t']:.3f}, p = {t['p']:.5f} (one-tailed), d = {t['d']:.3f}\n"
+        )
+        f.write(
+            "- Note: A one-tailed p-value is reported because the hypothesis is "
+            "directional — we predicted that students with internships would have "
+            "*higher* GPA, not merely *different* GPA. "
+            "scipy.stats.ttest_ind returns a two-tailed p-value by default, "
+            "so the reported p-value is that result divided by 2. "
+            "This is valid because the t-statistic is positive, confirming the "
+            "observed difference is in the predicted direction.\n"
+        )
 
         if t["p"] < 0.05:
             f.write("- Result: Statistically significant difference.\n\n")
@@ -333,6 +453,26 @@ def write_findings(df, corr_matrix, top_pairs, results):
         else:
             f.write("- Result: No significant association.\n\n")
 
+        a = results["anova_dict"]
+
+        f.write("### GPA across Departments (ANOVA)\n")
+        f.write(f"- F-statistic = {a['f_stat']:.4f}, p = {a['p_value']:.6f}\n")
+
+        if a["p_value"] < 0.05:
+            f.write("- Result: At least one department differs significantly.\n\n")
+        else:
+            f.write("- Result: No significant difference between departments.\n\n")
+
+        if a["posthoc"]:
+            f.write("#### Post-hoc Pairwise Comparisons (Bonferroni)\n")
+            for row in a["posthoc"]:
+                f.write(
+                    f"- {row['dept_a']} vs {row['dept_b']}: "
+                    f"p_adj = {row['p_bonf']:.5f} "
+                    f"({'Significant' if row['significant'] else 'Not significant'})\n"
+                )
+            f.write("\n")
+
         f.write("## Recommendations\n")
         f.write("- Encourage students to increase study hours.\n")
         f.write("- Expand internship opportunities.\n")
@@ -343,13 +483,12 @@ def main():
     """Orchestrate the full EDA pipeline."""
     os.makedirs("output", exist_ok=True)
 
-    os.makedirs("output", exist_ok=True)
-
     df = load_and_profile("data/student_performance.csv")
 
     plot_distributions(df)
     corr_matrix, top_pairs = plot_correlations(df)
     results = run_hypothesis_tests(df)
+    plot_violin(df)
     write_findings(df, corr_matrix, top_pairs, results)
 
     print("\nTop correlated pairs:", top_pairs)
