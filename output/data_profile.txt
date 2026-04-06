@@ -1,0 +1,30 @@
+shape:(2000, 10)
+data types:
+student_id                str
+department                str
+semester                  str
+course_load             int64
+study_hours_weekly    float64
+gpa                   float64
+attendance_pct        float64
+has_internship            str
+commute_minutes       float64
+scholarship               str
+Missing Values:
+student_id: 0 (0.00%)
+department: 0 (0.00%)
+semester: 0 (0.00%)
+course_load: 0 (0.00%)
+study_hours_weekly: 0 (0.00%)
+gpa: 0 (0.00%)
+attendance_pct: 0 (0.00%)
+has_internship: 0 (0.00%)
+commute_minutes: 181 (9.05%)
+scholarship: 389 (19.45%)
+
+Reason why the missing values were handled like this:
+commute minutes ~9% missing was computed using the median because it is a numeric variable and it is robust
+                to outliers , also the max value is 79 min which is far from the 75% percentile and this suggests
+                right skewed (right tail) and this would pull the mean upwards
+ scholarship ~19% missing was filled with "None" because it is a categorical variable and it is more meaningful 
+                to represent absence of scholarship and avoid dropping a large portion of data.
